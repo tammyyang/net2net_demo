@@ -10,3 +10,7 @@ THEANO_FLAGS=exception_verbosity=high,device=gpu,floatX=float32 python mnist_net
 ```
 
 The script inserts a fully connected layer after the 7th layer of the original net. If you are interested in replacing it, find `new_layer = (7, Dense(128))` in `mnist_net2net.py` and replace it with ($INDEX, $LAYER) you want. 
+
+## Result
+
+![](dist_1d.png)
