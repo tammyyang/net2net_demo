@@ -6,7 +6,7 @@ import argparse
 from keras.datasets import mnist
 from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
-from keras.layers.convolutional import Convolution2D, MaxPooling2D
+from keras.layers.convolutional import Convolution2D, MaxPooling2D, ZeroPadding2D
 from keras.utils import np_utils
 from keras.models import model_from_json
 from net2net import Net2Net
@@ -63,7 +63,8 @@ def create_model(insert=None):
               Activation('softmax')]
 
     if insert is not None:
-        layers.insert(insert[0], insert[1])
+        for l in insert['layers']:
+            layers.insert(insert['index'], l)
 
     for layer in layers:
         model.add(layer)
@@ -104,7 +105,11 @@ def main():
     args = parser.parse_args()
 
     n2n = Net2Net()
-    new_layer = (7, Dense(128))
+    # new_layers = {'index': 7,
+    #               'layers': [Dense(128)]}
+    new_layers = {'index': 3,
+                  'layers': [Convolution2D(nb_filters, nb_conv, nb_conv),
+                             ZeroPadding2D((1, 1))]}
     X_train, X_test, Y_train, Y_test = prepare_mnist_data()
 
     ori_model = create_model()
@@ -120,28 +125,30 @@ def main():
             verbose=1, validation_data=(X_test, Y_test))
         ori_model.save_weights(args.weights)
 
+    ori_model.summary()
     ori_model.load_weights(args.weights)
     ori_layers = ori_model.layers
 
-    model = create_model(insert=new_layer)
+    model = create_model(insert=new_layers)
     model.summary()
-    parms = ori_layers[new_layer[0]].get_weights()
-    weights = parms[0]
+    i = new_layers['index'] - 1
+    parms = ori_layers[i].get_weights()
+
+    # The dim of Keras conv layer is (InChannel, OutChannel, kH, kW)
+    # while Net2Net class accepts (kH, kW, InChannel, OutChannel)
+    weights = parms[0].swapaxes(0,2).swapaxes(1,3)
     bias = parms[1]
-    print("Net2Net: Original weights and bias of layer %i" % new_layer[0])
-    print(weights.shape, bias.shape)
     new_w, new_b = n2n.deeper(weights, True)
-    print("Net2Net: New weights and bias of layer %i" % (new_layer[0]+1))
-    print(new_w.shape, new_b.shape)
+    new_w = new_w.swapaxes(0,2).swapaxes(1,3)
 
     for j in range(0, len(ori_layers)):
-        if j <= new_layer[0]:
+        if j <= i:
             parm = ori_layers[j].get_weights()
             model.layers[j].set_weights(parm)
-        elif j == new_layer[0] + 1:
+        elif j == i + len(new_layers['layers']):
             model.layers[j].set_weights([new_w, new_b])
-        else:
-            parm = ori_layers[j-1].get_weights()
+        elif j > i + len(new_layers['layers']):
+            parm = ori_layers[j-2].get_weights()
             model.layers[j].set_weights(parm)
 
     model.compile(loss=args.loss,
