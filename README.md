@@ -14,3 +14,4 @@ The script inserts a fully connected layer after the 7th layer of the original n
 ## Result
 
 ![](dist_1d.png)
+![](dist_1d_log.png)
