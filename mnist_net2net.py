@@ -2,12 +2,17 @@
 Replace NEWLAYERS with different layer you would like to use to expand
 your network.
 
+Parameters:
+    insert_pos - index of the newly inserted layer
+    layers     - a list of layers to be inserted
+
 Example to insert a FC layer:
-    NEWLAYERS = {'index': 8,
+    NEWLAYERS = {'insert_pos': 8,
                  'layers': [Dense(128)]}
 Example to insert a Conv layer:
-    NEWLAYERS = {'index': 3,
-                 'layers': [Convolution2D(NB_FILTERS, NB_CONV, NB_CONV),
+    NEWLAYERS = {'insert_pos': 2,
+                 'layers': [Activation('relu'),
+                            Convolution2D(NB_FILTERS, NB_CONV, NB_CONV),
                             ZeroPadding2D((1, 1))]}
 
 Padding is required to keep the size of the convolutional layers the same
@@ -22,7 +27,7 @@ import argparse
 from keras.datasets import mnist
 from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
-from keras.layers.core import ZeroPadding2D
+from keras.layers.convolutional import ZeroPadding2D
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.utils import np_utils
 from keras.models import model_from_json
@@ -35,11 +40,14 @@ NB_FILTERS = 32
 NB_POOL = 2
 NB_CONV = 3
 
-NEWLAYERS = {'index': 3,
-             'layers': [Convolution2D(NB_FILTERS, NB_CONV, NB_CONV),
+NEWLAYERS = {'insert_pos': 2,
+             'layers': [Activation('relu'),
+                        Convolution2D(NB_FILTERS, NB_CONV, NB_CONV),
                         ZeroPadding2D((1, 1))]}
 
+
 def prepare_mnist_data():
+    '''Ger MNIST data'''
 
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
 
@@ -61,13 +69,13 @@ def prepare_mnist_data():
 
 
 def create_model(insert=None):
+    '''Create the basic model'''
+
     model = Sequential()
 
     layers = [Convolution2D(NB_FILTERS, NB_CONV, NB_CONV,
                             border_mode='valid',
                             input_shape=(1, IMGROWS, IMGCOLS)),
-              Activation('relu'),
-              Convolution2D(NB_FILTERS, NB_CONV, NB_CONV),
               Activation('relu'),
               MaxPooling2D(pool_size=(NB_POOL, NB_POOL)),
               Dropout(0.25),
@@ -80,7 +88,7 @@ def create_model(insert=None):
 
     if insert is not None:
         for l in insert['layers']:
-            layers.insert(insert['index'], l)
+            layers.insert(insert['insert_pos'], l)
 
     for layer in layers:
         model.add(layer)
@@ -88,25 +96,59 @@ def create_model(insert=None):
     return model
 
 
-def if_convolutional(new_layers):
-    for layer in new_layers['layers']:
-        ltype = layer.get_config()['name'].split('_')[0]
-        if ltype.find('convolution') > -1:
-            return True
-    return None
+def is_dense(layer):
+    '''Check if the layer is dense (fully connected)'''
+
+    ltype = layer.get_config()['name'].split('_')[0]
+    if ltype == 'dense':
+        return True
+    return False
+
+
+def is_convolutional(layer):
+    '''Check if the layer is convolutional'''
+
+    ltype = layer.get_config()['name'].split('_')[0]
+    if ltype.find('convolution') > -1:
+        return True
+    return False
+
+
+def find_ref_layer_idx(layers):
+    '''
+    Find the index of the reference layer. It looks for Conv or FC
+    layer from (insert_pos - 1) to 0 of the ori_layers list and return
+    the index of the found layer
+    '''
+
+    insert_pos = NEWLAYERS['insert_pos']
+    for i in range(1, insert_pos + 1):
+        ref_layer = layers[insert_pos - i]
+        if is_convolutional(ref_layer) or is_dense(ref_layer):
+            return insert_pos - i
+
+
+def find_major_layer_idx():
+    '''Looking for the Conv or FC layer in NEWLAYERS['layers']'''
+
+    for i in range(0, len(NEWLAYERS['layers'])):
+        layer = NEWLAYERS['layers'][i]
+        if is_convolutional(layer) or is_dense(layer):
+            return i
+    return -1
 
 
 def get_deeper_weights(ref_layer):
     '''
     To calculate new weights to make the net deeper using Net2Net class,
     one needs to swap the axes for the right order.
-    Dim of Keras conv layer: (InChannel, OutChannel, kH, kW)
+    Dim of Keras conv layer: (OutChannel, InChannel, kH, kW)
            conv layer Net2Net class accepts: (kH, kW, InChannel, OutChannel)
     '''
     parms = ref_layer.get_weights()
     n2n = Net2Net()
-    if if_convolutional(NEWLAYERS):
-        weights = parms[0].swapaxes(0, 2).swapaxes(1, 3)
+    if is_convolutional(ref_layer):
+        weights = parms[0].swapaxes(0, 2).swapaxes(1, 3).swapaxes(2, 3)
         new_w, new_b = n2n.deeper(weights, True)
         new_w = new_w.swapaxes(0, 2).swapaxes(1, 3)
     else:
@@ -147,7 +189,10 @@ def main():
 
     args = parser.parse_args()
 
+    X_train, X_test, Y_train, Y_test = prepare_mnist_data()
+
     ori_model = create_model()
+    ori_model.summary()
     if args.retrain or not os.path.exists(args.weights):
         print('Training the original model and save weights to %s'
               % args.weights)
@@ -158,15 +203,18 @@ def main():
         ori_model.fit(
             X_train, Y_train, batch_size=args.size, nb_epoch=args.epochs,
             verbose=1, validation_data=(X_test, Y_test))
-        ori_model.save_weights(args.weights)
+        ori_model.save_weights(args.weights, overwrite=True)
 
-    ori_model.summary()
     ori_model.load_weights(args.weights)
     ori_layers = ori_model.layers
 
     model = create_model(insert=NEWLAYERS)
     model.summary()
-    i = NEWLAYERS['index'] - 1
+    i = find_ref_layer_idx(ori_layers)
+
+    # Layers such as ZeroPadding2D or Activation gets no weights
+    shift = find_major_layer_idx()
+    shift = 0 if shift < 0 else shift
 
     new_w, new_b = get_deeper_weights(ori_layers[i])
 
@@ -175,7 +223,7 @@ def main():
         if j <= i:
             parm = ori_layers[j].get_weights()
             model.layers[j].set_weights(parm)
-        elif j == i + n_new_layers:
+        elif j == i + NEWLAYERS['insert_pos'] + shift:
             model.layers[j].set_weights([new_w, new_b])
         elif j > i + n_new_layers:
             parm = ori_layers[j - n_new_layers].get_weights()
@@ -185,7 +233,6 @@ def main():
                   optimizer=args.optimizer,
                   metrics=['accuracy'])
 
-    X_train, X_test, Y_train, Y_test = prepare_mnist_data()
     model.fit(X_train, Y_train, batch_size=args.size, nb_epoch=args.epochs,
               verbose=1, validation_data=(X_test, Y_test))
     score = model.evaluate(X_test, Y_test, verbose=0)
