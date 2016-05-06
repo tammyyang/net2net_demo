@@ -8,8 +8,27 @@ The reference of the demo net was from the [mnist_cnn.py](https://github.com/fch
 ```
 THEANO_FLAGS=exception_verbosity=high,device=gpu,floatX=float32 python mnist_net2net.py
 ```
+Replace NEWLAYERS with different layer you would like to use to expand
+your network.
 
-The script inserts a fully connected layer after the 7th layer of the original net. If you are interested in replacing it, find `new_layer = (7, Dense(128))` in `mnist_net2net.py` and replace it with ($INDEX, $LAYER) you want. 
+* Parameters:
+ * insert_pos - index of the newly inserted layer
+ * layers     - a list of layers to be inserted
+
+* Examples
+ * Insert a FC layer:
+   ```
+    NEWLAYERS = {'insert_pos': 8,
+                 'layers': [Dense(128)]}
+    ```
+ * Insert a Conv layer:
+    ```
+    NEWLAYERS = {'insert_pos': 2,
+                 'layers': [Activation('relu'),
+                            Convolution2D(NB_FILTERS, NB_CONV, NB_CONV),
+                            ZeroPadding2D((1, 1))]}
+    ```
+Padding is required to keep the size of the convolutional layers the same before and after the expansion.
 
 ## Result
 
