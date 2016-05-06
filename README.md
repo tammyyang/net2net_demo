@@ -13,5 +13,7 @@ The script inserts a fully connected layer after the 7th layer of the original n
 
 ## Result
 
+By adding one additional convolutional layer to the original net, one can get better results without training from scratch. Net2DeeperNet achieves a better validation accuracy (>99%) within 12 epochs.
+
 ![](dist_1d.png)
 ![](dist_1d_log.png)
